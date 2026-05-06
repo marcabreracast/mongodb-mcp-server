@@ -6,11 +6,11 @@ import { ensureCurrentIpInAccessList } from "../../../common/atlas/accessListUti
 import { AtlasArgs } from "../../args.js";
 import { z } from "zod";
 
-export class CreateClusterTool extends AtlasToolBase {
-    static toolName = "atlas-create-cluster";
+export class CreateProdClusterTool extends AtlasToolBase {
+    static toolName = "atlas-create-prod-cluster";
     static operationType: OperationType = "create";
     public description =
-        "Create a dedicated MongoDB Atlas cluster. Supports replica sets and sharded clusters across AWS, Azure, and GCP. Auto-scaling is always enabled. Use instanceSize M10+ for dedicated clusters (e.g. M10 for dev, M30+ for production). Provide either projectId or projectName to identify the target project.";
+        "Create a production-grade MongoDB Atlas cluster. Backup and termination protection are enabled by default. Supports multi-region deployments, sharded clusters, and M30+ instance sizes. Provide either projectId or projectName to identify the target project.";
 
     public argsShape = {
         projectId: AtlasArgs.projectId()
@@ -23,9 +23,9 @@ export class CreateClusterTool extends AtlasToolBase {
         name: AtlasArgs.clusterName().describe("Name of the cluster"),
         instanceSize: z
             .string()
-            .default("M10")
+            .default("M30")
             .describe(
-                "Instance size for the cluster nodes. Must be M10 or larger. Recommendations: M10 for dev/test or non-production workloads, M20-M30 for small production workloads, M40-M50 for medium production workloads, M60+ for large production workloads."
+                "Instance size for the cluster nodes. Must be M30 or larger. Recommendations: M30 for small production workloads, M40-M50 for medium, M60+ for large."
             ),
         provider: z
             .enum(["AWS", "AZURE", "GCP"])
@@ -35,7 +35,7 @@ export class CreateClusterTool extends AtlasToolBase {
             .array(AtlasArgs.region())
             .default(["US_EAST_1"])
             .describe(
-                "One or more cloud regions for the cluster. First region is the primary (priority 7, 3 nodes). Additional regions are secondaries (2 nodes each). Use multiple regions for multi-region deployments with at least 5 total electable nodes."
+                "One or more cloud regions for the cluster. First region is the primary (priority 7, 3 nodes). Additional regions are secondaries (2 nodes each). Use multiple regions for high availability."
             ),
         clusterType: z
             .enum(["REPLICASET", "SHARDED"])
@@ -47,11 +47,10 @@ export class CreateClusterTool extends AtlasToolBase {
             .min(1)
             .default(1)
             .describe("Number of shards. Only relevant when clusterType is SHARDED."),
-        backupEnabled: z.boolean().default(true).describe("Enable cloud backup for the cluster"),
         terminationProtectionEnabled: z
             .boolean()
-            .default(false)
-            .describe("Enable termination protection to prevent accidental deletion of the cluster"),
+            .default(true)
+            .describe("Enable termination protection to prevent accidental deletion. Defaults to true for production."),
     };
 
     protected async execute({
@@ -63,7 +62,6 @@ export class CreateClusterTool extends AtlasToolBase {
         regions,
         clusterType,
         numShards,
-        backupEnabled,
         terminationProtectionEnabled,
     }: ToolArgs<typeof this.argsShape>): Promise<CallToolResult> {
         if (!projectId && !projectName) {
@@ -86,6 +84,12 @@ export class CreateClusterTool extends AtlasToolBase {
             resolvedProjectId = match.id;
         }
 
+        const instanceSizeLadder = ["M10", "M20", "M30", "M40", "M50", "M60", "M80", "M140", "M200", "M300", "M400", "M700"];
+        const getMaxInstanceSize = (min: string): string => {
+            const idx = instanceSizeLadder.indexOf(min);
+            return idx === -1 ? "M60" : (instanceSizeLadder[Math.min(idx + 2, instanceSizeLadder.length - 1)] ?? "M60");
+        };
+
         const regionConfigs = regions.map((regionName, index) => ({
             providerName: provider,
             regionName,
@@ -99,7 +103,7 @@ export class CreateClusterTool extends AtlasToolBase {
                     enabled: true,
                     scaleDownEnabled: true,
                     minInstanceSize: instanceSize,
-                    maxInstanceSize: "M80",
+                    maxInstanceSize: getMaxInstanceSize(instanceSize),
                 },
                 diskGB: {
                     enabled: true,
@@ -116,7 +120,7 @@ export class CreateClusterTool extends AtlasToolBase {
             name,
             clusterType,
             replicationSpecs,
-            backupEnabled,
+            backupEnabled: true,
             terminationProtectionEnabled,
         };
 
@@ -130,7 +134,7 @@ export class CreateClusterTool extends AtlasToolBase {
             content: [
                 {
                     type: "text",
-                    text: `Cluster "${name}" (${clusterType}, ${instanceSize}, ${provider} ${regions.join(", ")}) creation started in project "${projectName ?? resolvedProjectId}". It will be available in a few minutes.`,
+                    text: `Production cluster "${name}" (${clusterType}, ${instanceSize}, ${provider} ${regions.join(", ")}) creation started in project "${projectName ?? resolvedProjectId}". It will be available in a few minutes.`,
                 },
             ],
         };

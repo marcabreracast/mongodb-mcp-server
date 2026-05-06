@@ -31,7 +31,7 @@ export class UpdateClusterTool extends AtlasToolBase {
         computeAutoScalingEnabled: z
             .boolean()
             .optional()
-            .describe("Enable or disable compute auto-scaling (instance size) for the cluster"),
+            .describe("Enable or disable compute auto-scaling (instance size) for the cluster."),
         diskAutoScalingEnabled: z
             .boolean()
             .optional()
@@ -48,6 +48,11 @@ export class UpdateClusterTool extends AtlasToolBase {
         computeAutoScalingEnabled,
         diskAutoScalingEnabled,
     }: ToolArgs<typeof this.argsShape>): Promise<CallToolResult> {
+        const instanceSizeLadder = ["M10", "M20", "M30", "M40", "M50", "M60", "M80", "M140", "M200", "M300", "M400", "M700"];
+        const getMaxInstanceSize = (min: string): string => {
+            const idx = instanceSizeLadder.indexOf(min);
+            return idx === -1 ? "M40" : (instanceSizeLadder[Math.min(idx + 2, instanceSizeLadder.length - 1)] ?? "M40");
+        };
         if (!projectId && !projectName) {
             return {
                 content: [{ type: "text", text: "Either projectId or projectName must be provided." }],
@@ -85,23 +90,31 @@ export class UpdateClusterTool extends AtlasToolBase {
         if (paused !== undefined) body.paused = paused;
         if (backupEnabled !== undefined) body.backupEnabled = backupEnabled;
         if (instanceSize !== undefined || computeAutoScalingEnabled !== undefined || diskAutoScalingEnabled !== undefined) {
-            body.replicationSpecs = [
-                {
-                    regionConfigs: [
-                        {
-                            ...(instanceSize !== undefined ? { electableSpecs: { instanceSize } } : {}),
-                            autoScaling: {
-                                ...(computeAutoScalingEnabled !== undefined
-                                    ? { compute: { enabled: computeAutoScalingEnabled, scaleDownEnabled: computeAutoScalingEnabled } }
-                                    : {}),
-                                ...(diskAutoScalingEnabled !== undefined
-                                    ? { diskGB: { enabled: diskAutoScalingEnabled } }
-                                    : {}),
-                            },
-                        },
-                    ],
-                },
-            ];
+            const existing = await this.apiClient.getCluster({
+                params: { path: { groupId: resolvedProjectId!, clusterName } },
+            });
+            const existingSpecs = existing.replicationSpecs ?? [];
+            body.replicationSpecs = existingSpecs.map(({ id: _specId, ...spec }) => ({
+                ...spec,
+                regionConfigs: (spec.regionConfigs ?? []).map(({ ...rc }) => ({
+                    ...rc,
+                    ...(instanceSize !== undefined ? { electableSpecs: { ...rc.electableSpecs, instanceSize } } : {}),
+                    autoScaling: {
+                        ...rc.autoScaling,
+                        ...(computeAutoScalingEnabled !== undefined
+                            ? {
+                                  compute: {
+                                      enabled: computeAutoScalingEnabled,
+                                      scaleDownEnabled: computeAutoScalingEnabled,
+                                      minInstanceSize: instanceSize ?? (rc.electableSpecs?.instanceSize ?? "M10"),
+                                      maxInstanceSize: getMaxInstanceSize(instanceSize ?? (rc.electableSpecs?.instanceSize ?? "M10")),
+                                  },
+                              }
+                            : {}),
+                        ...(diskAutoScalingEnabled !== undefined ? { diskGB: { enabled: diskAutoScalingEnabled } } : {}),
+                    },
+                })),
+            }));
         }
 
         await this.apiClient.updateCluster(resolvedProjectId!, clusterName, body);
