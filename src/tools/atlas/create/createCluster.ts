@@ -10,16 +10,22 @@ export class CreateClusterTool extends AtlasToolBase {
     static toolName = "atlas-create-cluster";
     static operationType: OperationType = "create";
     public description =
-        "Create a dedicated MongoDB Atlas cluster. Supports replica sets and sharded clusters across AWS, Azure, and GCP. Auto-scaling is always enabled. Use instanceSize M10+ for dedicated clusters (e.g. M10 for dev, M30+ for production).";
+        "Create a dedicated MongoDB Atlas cluster. Supports replica sets and sharded clusters across AWS, Azure, and GCP. Auto-scaling is always enabled. Use instanceSize M10+ for dedicated clusters (e.g. M10 for dev, M30+ for production). Provide either projectId or projectName to identify the target project.";
 
     public argsShape = {
-        projectId: AtlasArgs.projectId().describe("Atlas project ID to create the cluster in"),
+        projectId: AtlasArgs.projectId()
+            .optional()
+            .describe("Atlas project ID. Provide either this or projectName."),
+        projectName: z
+            .string()
+            .optional()
+            .describe("Atlas project name. Provide either this or projectId."),
         name: AtlasArgs.clusterName().describe("Name of the cluster"),
         instanceSize: z
             .string()
             .default("M10")
             .describe(
-                "Instance size for the cluster nodes (e.g. M10 for dev, M30 for production). Must be M10 or larger for dedicated clusters."
+                "Instance size for the cluster nodes. Must be M10 or larger. Recommendations: M10 for dev/test or non-production workloads, M20-M30 for small production workloads, M40-M50 for medium production workloads, M60+ for large production workloads."
             ),
         provider: z
             .enum(["AWS", "AZURE", "GCP"])
@@ -47,6 +53,7 @@ export class CreateClusterTool extends AtlasToolBase {
 
     protected async execute({
         projectId,
+        projectName,
         name,
         instanceSize,
         provider,
@@ -56,6 +63,26 @@ export class CreateClusterTool extends AtlasToolBase {
         backupEnabled,
         terminationProtectionEnabled,
     }: ToolArgs<typeof this.argsShape>): Promise<CallToolResult> {
+        if (!projectId && !projectName) {
+            return {
+                content: [{ type: "text", text: "Either projectId or projectName must be provided." }],
+                isError: true,
+            };
+        }
+
+        let resolvedProjectId = projectId;
+        if (!resolvedProjectId) {
+            const groups = await this.apiClient.listGroups();
+            const match = groups.results?.find((g) => g.name === projectName);
+            if (!match) {
+                return {
+                    content: [{ type: "text", text: `No project found with name "${projectName}".` }],
+                    isError: true,
+                };
+            }
+            resolvedProjectId = match.id;
+        }
+
         const regionConfig = {
             providerName: provider,
             regionName: region,
@@ -90,9 +117,9 @@ export class CreateClusterTool extends AtlasToolBase {
             terminationProtectionEnabled,
         };
 
-        await ensureCurrentIpInAccessList(this.apiClient, projectId);
+        await ensureCurrentIpInAccessList(this.apiClient, resolvedProjectId!);
         await this.apiClient.createCluster({
-            params: { path: { groupId: projectId } },
+            params: { path: { groupId: resolvedProjectId! } },
             body: body as ClusterDescription20240805,
         });
 
@@ -100,7 +127,7 @@ export class CreateClusterTool extends AtlasToolBase {
             content: [
                 {
                     type: "text",
-                    text: `Cluster "${name}" (${clusterType}, ${instanceSize}, ${provider} ${region}) creation started. It will be available in a few minutes.`,
+                    text: `Cluster "${name}" (${clusterType}, ${instanceSize}, ${provider} ${region}) creation started in project "${projectName ?? resolvedProjectId}". It will be available in a few minutes.`,
                 },
             ],
         };
