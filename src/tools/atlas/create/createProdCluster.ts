@@ -20,7 +20,9 @@ export class CreateProdClusterTool extends AtlasToolBase {
             .string()
             .optional()
             .describe("Atlas project name. Provide either this or projectId."),
-        name: AtlasArgs.clusterName().describe("Name of the cluster"),
+        name: AtlasArgs.clusterName().describe(
+            "Name of the cluster. Use a name that reflects the service and environment, e.g. 'myapp-prod', 'payments-prod'."
+        ),
         instanceSize: z
             .string()
             .default("M30")
