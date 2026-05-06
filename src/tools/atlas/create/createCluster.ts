@@ -38,11 +38,11 @@ export class CreateClusterTool extends AtlasToolBase {
             .min(1)
             .default(1)
             .describe("Number of shards. Only relevant when clusterType is SHARDED."),
-        backupEnabled: z.boolean().default(false).describe("Enable cloud backup for the cluster"),
-        mongoDBMajorVersion: z
-            .string()
-            .optional()
-            .describe("MongoDB major version (e.g. '8.0'). Defaults to the latest stable version if omitted."),
+        backupEnabled: z.boolean().default(true).describe("Enable cloud backup for the cluster"),
+        terminationProtectionEnabled: z
+            .boolean()
+            .default(false)
+            .describe("Enable termination protection to prevent accidental deletion of the cluster"),
     };
 
     protected async execute({
@@ -54,7 +54,7 @@ export class CreateClusterTool extends AtlasToolBase {
         clusterType,
         numShards,
         backupEnabled,
-        mongoDBMajorVersion,
+        terminationProtectionEnabled,
     }: ToolArgs<typeof this.argsShape>): Promise<CallToolResult> {
         const regionConfig = {
             providerName: provider,
@@ -87,8 +87,7 @@ export class CreateClusterTool extends AtlasToolBase {
             clusterType,
             replicationSpecs,
             backupEnabled,
-            terminationProtectionEnabled: false,
-            ...(mongoDBMajorVersion ? { mongoDBMajorVersion } : {}),
+            terminationProtectionEnabled,
         };
 
         await ensureCurrentIpInAccessList(this.apiClient, projectId);
