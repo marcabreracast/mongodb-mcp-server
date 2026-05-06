@@ -31,9 +31,12 @@ export class CreateClusterTool extends AtlasToolBase {
             .enum(["AWS", "AZURE", "GCP"])
             .default("AWS")
             .describe("Cloud provider for the cluster"),
-        region: AtlasArgs.region()
-            .default("US_EAST_1")
-            .describe("Cloud region for the cluster (e.g. US_EAST_1, EU_WEST_1)"),
+        regions: z
+            .array(AtlasArgs.region())
+            .default(["US_EAST_1"])
+            .describe(
+                "One or more cloud regions for the cluster. First region is the primary (priority 7, 3 nodes). Additional regions are secondaries (2 nodes each). Use multiple regions for multi-region deployments with at least 5 total electable nodes."
+            ),
         clusterType: z
             .enum(["REPLICASET", "SHARDED"])
             .default("REPLICASET")
@@ -57,7 +60,7 @@ export class CreateClusterTool extends AtlasToolBase {
         name,
         instanceSize,
         provider,
-        region,
+        regions,
         clusterType,
         numShards,
         backupEnabled,
@@ -83,13 +86,13 @@ export class CreateClusterTool extends AtlasToolBase {
             resolvedProjectId = match.id;
         }
 
-        const regionConfig = {
+        const regionConfigs = regions.map((regionName, index) => ({
             providerName: provider,
-            regionName: region,
-            priority: 7,
+            regionName,
+            priority: 7 - index,
             electableSpecs: {
                 instanceSize,
-                nodeCount: 3,
+                nodeCount: index === 0 ? 3 : 2,
             },
             autoScaling: {
                 compute: {
@@ -102,11 +105,11 @@ export class CreateClusterTool extends AtlasToolBase {
                     enabled: true,
                 },
             },
-        };
+        }));
 
         const replicationSpecs = Array.from({ length: clusterType === "SHARDED" ? numShards : 1 }, () => ({
             zoneName: "Zone 1",
-            regionConfigs: [regionConfig],
+            regionConfigs,
         }));
 
         const body: unknown = {
@@ -127,7 +130,7 @@ export class CreateClusterTool extends AtlasToolBase {
             content: [
                 {
                     type: "text",
-                    text: `Cluster "${name}" (${clusterType}, ${instanceSize}, ${provider} ${region}) creation started in project "${projectName ?? resolvedProjectId}". It will be available in a few minutes.`,
+                    text: `Cluster "${name}" (${clusterType}, ${instanceSize}, ${provider} ${regions.join(", ")}) creation started in project "${projectName ?? resolvedProjectId}". It will be available in a few minutes.`,
                 },
             ],
         };
