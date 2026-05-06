@@ -353,6 +353,32 @@ export class ApiClient {
         }
     }
 
+    async updateCluster(
+        groupId: string,
+        clusterName: string,
+        body: Partial<components["schemas"]["ClusterDescription20240805"]>
+    ): Promise<components["schemas"]["ClusterDescription20240805"]> {
+        const authHeaders = (await this.authProvider?.getAuthHeaders()) ?? {};
+        const url = new URL(
+            `api/atlas/v2/groups/${groupId}/clusters/${clusterName}`,
+            this.options.baseUrl
+        );
+        const response = await fetch(url, {
+            method: "PATCH",
+            headers: {
+                ...authHeaders,
+                "Content-Type": `application/vnd.atlas.${ATLAS_API_VERSION}+json`,
+                Accept: `application/vnd.atlas.${ATLAS_API_VERSION}+json`,
+                "User-Agent": this.options.userAgent,
+            },
+            body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+            throw await ApiClientError.fromResponse(response);
+        }
+        return response.json() as Promise<components["schemas"]["ClusterDescription20240805"]>;
+    }
+
     async getCluster(
         options: FetchOptions<operations["getGroupCluster"]>
     ): Promise<components["schemas"]["ClusterDescription20240805"]> {
