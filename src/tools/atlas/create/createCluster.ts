@@ -17,6 +17,7 @@ export class CreateClusterTool extends AtlasToolBase {
         name: AtlasArgs.clusterName().describe("Name of the cluster"),
         instanceSize: z
             .string()
+            .default("M10")
             .describe(
                 "Instance size for the cluster nodes (e.g. M10 for dev, M30 for production). Must be M10 or larger for dedicated clusters."
             ),
